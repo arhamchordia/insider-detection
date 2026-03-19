@@ -1,0 +1,105 @@
+# Startup order: postgres → migrate → api → dashboard
+#
+# Run the full stack:
+#   docker compose up --build
+#
+# Run the scorer (last 5 minutes):
+#   docker compose run --rm scorer
+#
+# Run the scorer over a fixed historical window:
+#   SCAN_WINDOW_FROM=1759017600 SCAN_WINDOW_TO=1761350399 \
+#     docker compose run --rm scorer
+
+services:
+
+  # ── 1. Database ──────────────────────────────────────────────────────────────
+  # Credentials can be overridden via environment variables or a .env file:
+  #   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+  # IMPORTANT: .env must NOT be committed to version control as it may contain
+  # sensitive credentials. Add it to .gitignore.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-insider_detection}
+    # Port not exposed to host — DB is only reachable within the Docker network.
+    # To inspect locally: docker compose exec postgres psql -U postgres insider_detection
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-insider_detection}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── 2. Schema migration ──────────────────────────────────────────────────────
+  migrate:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command: >
+      psql postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-insider_detection}
+        -f /migrations/0001_initial_schema.sql
+
+  # ── 3. Rust API ──────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["./api"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      # Override DATABASE_URL from .env — inside Docker use service name, not localhost.
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-insider_detection}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ── 4. React dashboard ───────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+  # ── Scorer (on-demand) ───────────────────────────────────────────────────────
+  # Not part of the default stack — run explicitly:
+  #   docker compose run --rm scorer
+  scorer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    command: ["./scorer"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-insider_detection}
+    profiles:
+      - scorer
+
+volumes:
+  pgdata:
