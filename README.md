@@ -6,6 +6,16 @@ Results are written to PostgreSQL, served via a REST API, and visualised in a Re
 
 ---
 
+## Dashboard
+
+| Wallet List | Wallet Detail |
+|---|---|
+| ![Wallet list with score distribution](docs/screenshots/dashboard-wallet-list.png) | ![Wallet detail with radar chart and trade history](docs/screenshots/dashboard-wallet-detail.png) |
+
+![All wallets view](docs/screenshots/dashboard-all-wallets.png)
+
+---
+
 ## How it works
 
 ```
@@ -122,9 +132,33 @@ docker compose exec postgres psql -U postgres insider_detection
 
 ## Scoring a specific wallet on demand
 
-### CLI
+### Docker (recommended)
 
-The `score-wallet` binary fetches fresh data, uses the Gamma API for accurate entry timing, and upserts to the database.
+The `score-wallet` binary is included in the same Docker image as the API. Run it via the `api` service with a custom entrypoint:
+
+```bash
+# Single address
+docker compose run --rm --entrypoint ./score-wallet api 0xabc123...
+
+# Multiple addresses
+docker compose run --rm --entrypoint ./score-wallet api \
+  0xabc123... \
+  0xdef456...
+
+# Re-score all known insiders
+docker compose run --rm --entrypoint ./score-wallet api \
+  0xee50a31c3f5a7c77824b12a941a54388a2827ed6 \
+  0x6baf05d193692bb208d616709e27442c910a94c5 \
+  0x0afc7ce56285bde1fbe3a75efaffdfc86d6530b2 \
+  0x7f1329ade2ec162c6f8791dad99125e0dc49801c \
+  0x31a56e9e690c621ed21de08cb559e9524cdb8ed9 \
+  0x976685b6e867a0400085b1273309e84cd0fc627c \
+  0x55ea982cebff271722419595e0659ef297b48d7c
+```
+
+> The `api` service must already be running (i.e. `docker compose up -d`) so the database is reachable.
+
+### Local dev (Rust toolchain required)
 
 ```bash
 cargo run --bin score-wallet -- 0xabc123...
@@ -239,6 +273,8 @@ insider-detection/
 │   ├── Dockerfile              # Multi-stage: node build → nginx serve
 │   ├── vite.config.ts
 │   └── package.json
+├── docs/
+│   └── screenshots/            # Dashboard screenshots for README
 ├── Dockerfile                  # Multi-stage: cargo-chef dep cache → release build → slim runtime
 ├── docker-compose.yml          # postgres → migrate → api → dashboard (sequential startup)
 ├── .sqlx/                      # sqlx offline query cache (required for Docker build)
@@ -262,15 +298,4 @@ Seven wallets with publicly confirmed insider trading activity are seeded into `
 | `0x976685…6c` | Micro Strategy fromagi | MicroStrategy stock bet |
 | `0x55ea98…7c` | DraftKings flaccidwillie | DraftKings acquisition |
 
-Re-score all of them at once:
-
-```bash
-cargo run --bin score-wallet -- \
-  0xee50a31c3f5a7c77824b12a941a54388a2827ed6 \
-  0x6baf05d193692bb208d616709e27442c910a94c5 \
-  0x0afc7ce56285bde1fbe3a75efaffdfc86d6530b2 \
-  0x7f1329ade2ec162c6f8791dad99125e0dc49801c \
-  0x31a56e9e690c621ed21de08cb559e9524cdb8ed9 \
-  0x976685b6e867a0400085b1273309e84cd0fc627c \
-  0x55ea982cebff271722419595e0659ef297b48d7c
-```
+Re-score all of them at once — see the [score-wallet Docker command](#docker-recommended) above.
