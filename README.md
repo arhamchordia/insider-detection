@@ -160,11 +160,23 @@ docker compose run --rm --entrypoint ./score-wallet api \
 
 ### Local dev (Rust toolchain required)
 
+`cargo build` uses sqlx compile-time query validation and requires a live database. Start the stack first, then build:
+
 ```bash
-cargo run --bin score-wallet -- 0xabc123...
+# Start postgres and apply schema
+docker compose up -d postgres
+docker compose run --rm migrate
+
+# Point cargo at the local DB and build
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/insider_detection \
+  cargo run --bin score-wallet -- 0xabc123...
+
 # Multiple addresses:
-cargo run --bin score-wallet -- 0xabc... 0xdef...
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/insider_detection \
+  cargo run --bin score-wallet -- 0xabc... 0xdef...
 ```
+
+> Requires the postgres port to be exposed. Add `ports: ["5432:5432"]` under the `postgres` service in `docker-compose.yml` for local dev, or run a standalone postgres container.
 
 ### API endpoint
 
@@ -257,6 +269,7 @@ insider-detection/
 │   ├── data_api/
 │   │   └── client.rs           # Polymarket Data API client (trades, positions, activity)
 │   ├── gamma/
+│   │   ├── mod.rs              # Module re-exports
 │   │   └── client.rs           # Polymarket Gamma API client (market end dates, cached)
 │   ├── scorer/
 │   │   ├── factors.rs          # Pure factor functions + unit tests
@@ -268,16 +281,18 @@ insider-detection/
 ├── dashboard/
 │   ├── src/
 │   │   ├── App.tsx             # Main dashboard UI
-│   │   └── lib/api.ts          # Typed REST client
+│   │   ├── main.tsx            # React entry point
+│   │   ├── vite-env.d.ts       # Vite type declarations
+│   │   ├── lib/api.ts          # Typed REST client
+│   │   └── test/               # Component tests
 │   ├── nginx.conf              # nginx config — serves static files, proxies /api to api:8080
 │   ├── Dockerfile              # Multi-stage: node build → nginx serve
 │   ├── vite.config.ts
 │   └── package.json
 ├── docs/
-│   └── screenshots/            # Dashboard screenshots for README
+│   └── screenshots/            # Dashboard screenshots
 ├── Dockerfile                  # Multi-stage: cargo-chef dep cache → release build → slim runtime
 ├── docker-compose.yml          # postgres → migrate → api → dashboard (sequential startup)
-├── .sqlx/                      # sqlx offline query cache (required for Docker build)
 ├── Cargo.toml
 └── .env                        # Local config — never commit this
 ```
@@ -298,4 +313,4 @@ Seven wallets with publicly confirmed insider trading activity are seeded into `
 | `0x976685…6c` | Micro Strategy fromagi | MicroStrategy stock bet |
 | `0x55ea98…7c` | DraftKings flaccidwillie | DraftKings acquisition |
 
-Re-score all of them at once — see the [score-wallet Docker command](#docker-recommended) above.
+Re-score all of them at once using the Docker command in [Scoring a specific wallet on demand](#scoring-a-specific-wallet-on-demand).
